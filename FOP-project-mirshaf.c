@@ -1,18 +1,91 @@
 #include <stdio.h>
-#include <sys/stat.h> //getcwd() mkdir()
+#include <sys/stat.h> //getcwd() mkdir() ...
 #include <string.h> //strcmp()
-//#include <stdlib.h> //malloc()
+#include <stdlib.h> //atoi()
+//#include <unistd.h> //existDir
 #include <errno.h> //errno = 0, perror(), strerror(), ENOENT, EEXIST
 //Whenever you want to read errno to see if there are any errors, initialize it to 0 beforehend.(cuz if there is no error, errno will not be change from it's last state.
 //#include <unistd.h>
-//Do not forget to put '\0' at the end of every string
+/*Notes:
+Do not forget to put '\0' at the end of every string
+Remember to close every file when you are done with it.
+The inputs are guaranteed to be in the specified structures. And in order.
 
-#define maxStrInALine 10 //Assuming each line has a maximum of 10 strings and each string has less than 400 characters
+"root/" and "root" are acceptable but "/root" is not! You must handle both inputs though.
+the input is like "/root/my.txt" instead of "root/my.txt" so I will +1 the directoryStr pointer.
+IN SHORT: there should not be a '/' at the start or the end of the directory. "/root/me.txt/" is not acceptable(vs "/root/me.txt") but should be handled.
+
+*/
+
+#define maxStrInALine 15 //Assuming each line has a maximum of 10 strings and each string has less than 400 characters
 #define maxCharInAStr 400
 #define maxDepth 2*maxStrInALine
 #define maxFileNameLen maxCharInAStr/10
 char cwd[maxCharInAStr], lineBuff[maxStrInALine][maxCharInAStr]; //sizeof(cwd) = 400, cwd = C:\Users\John\Desktop\Folder, linebuff = {"createfile", "--file", "/root/t.e st/my.txt"}
 char directory[maxDepth][maxFileNameLen]; //For example {"C:", "Users", "John"}
+
+
+void display(char *message){
+    if(message[0] == '\0'){
+        printf("Error.\n");
+    }
+    else{
+        printf("%s\n", message);
+    }
+}
+
+int existDir(const char * const path){ //can get either absolute or relative path
+    struct stat stats;
+    int isFile = 0;
+    char temp[maxCharInAStr];
+    strcpy(temp, path);
+    for(int i = strlen(temp) - 1; i >= 0; i--){
+        if(temp[i] == '.') isFile = 1;
+        if( (temp[i] == '/') && i!=(strlen(temp) - 1) ){
+            if(isFile){
+                temp[i] = '\0';
+            }
+            break;
+        }
+    }
+
+    stat(temp, &stats); //save information about the file pointed to by "path" to "stats"
+
+    // Check for file existence
+    if (S_ISDIR(stats.st_mode))
+        return 1;
+
+    return 0;
+}
+int existFile(const char * const fname){ //can get either absolute or relative path
+    FILE *file;
+
+    if ((file = fopen(fname, "r")))
+    {
+        fclose(file);
+        return 1;
+    }
+    return 0;
+}
+int handleExistence(char *path){ //Can change the path section of "lineBuff"
+    //Warning: the following might cause memory leak.
+    if(path[0] == '/'){
+        char temp[maxCharInAStr];
+        strcpy(temp, path+1);
+        strcpy(path, temp);
+    } // "root/me.txt" is acceptable but "/root/me.txt" is not!
+    if(path[strlen(path) - 1] == '/') path[strlen(path) - 1] = '\0'; // "root/me.txt" is acceptable but "root/me.txt/" is not!
+
+    if(existDir(path)){
+        if(existFile(path)){
+            return 1;
+        }
+        display("There is no such file in that directory.");
+        return 0;
+    }
+    display("There is no such directory.");
+    return 0;
+}
 
 char whitespace(){ //ignore the spaces
     char c = ' ';
@@ -21,12 +94,13 @@ char whitespace(){ //ignore the spaces
 }
 int getline(char out[maxStrInALine][maxCharInAStr]){ //returns the number of strings(words) in the line
     char c;
-    int currentStr = 0, currentChar = 0;
-    while( (c = whitespace()) != '\n'){
+    int currentStr = 0, currentChar = 0, EFlag = 0; //Error Flag
+    while( (c = whitespace()) != '\n'){ //take input until \n
         currentChar = 0;
-        if(c == '"'){
-            while((c = getchar()) != '"'){
-                if(c == '\n') return -1;
+        if( (c == '"') && (1) ){ //the first '"' is guaranteed to come after a space.
+            //The following can cause an erroooooooooooooooooooooooooor because of [currentchar-1]
+            while( ((c = getchar()) != '"') || ( (out[currentStr][currentChar - 1] == '\\') && (out[currentStr][currentChar - 2] != '\\')) ){ //can handle "he said \"Hi!\""
+                if(c == '\n') return -1; //Attentioooooooooooooooooooooooooooooon. should return -2.
                 out[currentStr][currentChar] = c;
                 currentChar++;
             }
@@ -36,7 +110,8 @@ int getline(char out[maxStrInALine][maxCharInAStr]){ //returns the number of str
             do{
                 if(c == '\n'){
                     out[currentStr][currentChar] = '\0';
-                    return currentStr+1;
+                    if(EFlag) return -1;
+                    return currentStr+1; //Attentioooooooooooooooooooooooooooooon
                 }
                 out[currentStr][currentChar] = c;
                 currentChar++;
@@ -45,27 +120,94 @@ int getline(char out[maxStrInALine][maxCharInAStr]){ //returns the number of str
             out[currentStr][currentChar] = '\0';
         }
         currentStr++;
+        if(currentStr >= maxStrInALine - 1){
+            currentStr = 1;
+            EFlag = 1;
+        }
+
+        if(!strcmp(out[currentStr-1], "--pos")){
+            currentChar = 0;
+            while((c = whitespace()) != ':'){
+                out[currentStr][currentChar] = c;
+                currentChar++;
+            }
+            out[currentStr][currentChar] = '\0';
+            currentStr++;
+            currentChar = 0;
+            while((c = getchar()) != ' '){
+                if(c == '\n'){
+                    out[currentStr][currentChar] = '\0';
+                    if(EFlag) return -1;
+                    return currentStr+1; //Attentioooooooooooooooooooooooooooooon
+                }
+                out[currentStr][currentChar] = c;
+                currentChar++;
+            }
+            out[currentStr][currentChar] = '\0';
+            currentStr++;
+        }
     }
-    return currentStr;
+    if(EFlag) return -1; //if there is too many words in one line
+    return currentStr; //The function usually has already returned above in the loop
 }
-void display(char *message){
-    if(message[0] == '\0'){
-        printf("Error.\n");
+int processLine(char lineBuff[maxStrInALine][maxCharInAStr], int nos){ //number of strings
+    //Add an indicator of the end:
+    strcpy(lineBuff[nos], "EOL"); //End Of Line
+
+    //Handle backslash characters:
+    for(int i = 0; i < nos; i++){
+        char c = '\0';
+        for(int j = 0; (c = lineBuff[i][j]) != '\0'; j++){
+            if(c == '\\' ){
+                char temp = lineBuff[i][j+1], toBe = '\0';
+                if(temp == 'n') toBe = '\n';
+                else if(temp == '\\') toBe = '\\';
+                else if(temp == 't') toBe = '\t';
+                else if(temp == '"') toBe = '"';
+
+                if(toBe != '\0'){
+                    char temp[maxCharInAStr];
+                    for(int k = 0; k < j; k++){
+                        temp[k] = lineBuff[i][k];
+                    }
+                    temp[j] = toBe;
+                    for(int k = j+2; 1; k++){
+                        if(lineBuff[i][k] == '\0'){
+                            temp[k-1] = '\0'; //I once again forgot to put '\0' and encountered a bug
+                            break;
+                        }
+                        temp[k-1] = lineBuff[i][k];
+                    }
+                    strcpy(lineBuff[i], temp);
+                    //i--;
+                    //break;
+                    //instead:
+                    continue;
+                }
+            }
+        }
     }
-    else{
-        printf("%s\n", message);
-    }
+
+    /*BUG!
+    //Correct the path:
+    for(int i = 0; i < nos-1; i++){
+        if(!strcmp(lineBuff[i], "--file")){
+            //Warning: the following might cause memory leak.
+            if(lineBuff[i+1][0] == '/'){
+                char temp[maxCharInAStr];
+                strcpy(temp, lineBuff[i+1]+1);
+                strcpy(lineBuff[i+1], temp);
+            } // "root/me.txt" is acceptable but "/root/me.txt" is not!
+            if(lineBuff[i+1][strlen(lineBuff[i+1]) - 1] == '/') lineBuff[i+1][strlen(lineBuff[i+1]) - 1] = '\0'; // "root/me.txt" is acceptable but "root/me.txt/" is not!
+        }
+    }*/
 }
-void Earg(int n, int mode){
-    if(mode == -1) printf("This command needs atleast %d arguments.\n", n);
-    else if(mode == 0) printf("This command needs exactly %d arguments.\n", n);
-    else if(mode == 1) printf("This command needs less than %d arguments.\n", n);
-}
-int parseDir(char *in, char directory[maxDepth][maxFileNameLen]){ // must be in: '/root/dir1/dir2/file.txt' or '/root' or '/root/' format. This function manipulates the directory variable.
+
+int parseDir(const char *in, char directory[maxDepth][maxFileNameLen]){ // must be in: '/root/dir1/dir2/file.txt' or '/root' or '/root/' format. This function manipulates the directory variable.
     //'in' mustnot be empty.
     int i = 0, Depth = -1, FNM = 0;
     while(in[i] != '\0'){
-        if(in[i] == '/'){
+        if(in[i] == '/'){ //Beware that we are not handling backslash
             if(Depth != -1) directory[Depth][FNM + 1] = '\0';
             i++;
             Depth++;
@@ -82,8 +224,7 @@ int parseDir(char *in, char directory[maxDepth][maxFileNameLen]){ // must be in:
     if(in[i-1] == '/') Depth--;
     return Depth+1;
 }
-
-int createDir(char directory[maxDepth][maxFileNameLen], int depth){ //This function manipulates the cwd variable.
+int createDir(const char directory[maxDepth][maxFileNameLen], int depth){ //This function manipulates the cwd variable.
     getcwd(cwd, sizeof(cwd));
     //printf("%s, %d\n", cwd, sizeof(cwd)); for some reason if pass cwd into the function instead of calling it globally, this sizeof(cwd) would be 8
     for(int i = 0; i < depth-1; i++){
@@ -120,9 +261,67 @@ int createDir(char directory[maxDepth][maxFileNameLen], int depth){ //This funct
     else{
         if( (mkdir(cwd)) == -1){
             if(errno != EEXIST) return -2; //Unknown error
+            else return -1; //File(should be directory) already exists
         }
         return 1; //directory created successfully.
     }
+}
+
+int insertstr(){ //Uses the "lineBuff".
+    FILE *mainFile = fopen(lineBuff[2], "r");
+    //if(mainFile == NULL) printf("GG\n");
+    //printf("%s\n", lineBuff[2]);
+    FILE *fileBuff = fopen("fileBuff.txt", "w");
+    int currentLine = 1, currentChar = 0, targetLine = atoi(lineBuff[6]), targetChar = atoi(lineBuff[7]);
+    char c;
+    while(!feof(mainFile)){
+        if( (c = fgetc(mainFile)) != EOF){
+            fputc(c, fileBuff);
+
+        if(currentLine == targetLine){
+            if(c!='\n') currentChar++;
+        }
+        if(c=='\n') currentLine++;
+
+        }
+    }
+    fclose(mainFile);
+    fclose(fileBuff);
+    if((currentLine >= targetLine) && (targetLine>=1)){
+        if((currentChar >= targetChar) && (targetChar>=0)){
+            mainFile = fopen(lineBuff[2], "w");
+            fileBuff = fopen("fileBuff.txt", "r");
+            currentLine = 1;
+            currentChar = 0;
+
+            while(!feof(fileBuff)){
+                if(currentLine == targetLine){
+                    if(currentChar == targetChar){
+                        for(int i = 0; i < strlen(lineBuff[4]); i++){
+                            fputc(lineBuff[4][i], mainFile);
+                        }
+                    }
+                    currentChar++;
+                }
+
+                if( (c = fgetc(fileBuff)) != EOF){
+                    fputc(c, mainFile);
+                }
+                if(c=='\n') currentLine++;
+            }
+
+            fclose(mainFile);
+            fclose(fileBuff);
+            display("Inserted successfully.");
+            return 0;
+        }
+    }
+    display("Error: The specified position does not exist in the file. Remember that line_number is 1 based and char_number is 0 based.");
+    return -1;
+}
+
+int cat(){
+
 }
 
 int main(){
@@ -134,11 +333,17 @@ int main(){
 
     while(1){
         int nos = getline(lineBuff); //Number of strings(words)
+        processLine(lineBuff, nos);
+        /*printf("nos: %d\n", nos);
+        for(int i = 0; i < nos; i++){
+            printf("<%s>", lineBuff[i]);
+        }
+        printf("\n");*/
         if(nos == 0) continue;
+        else if(nos == -1) display("Error: too many words in one line.");
 
         else if(!strcmp(lineBuff[0], "createfile")){
             if(nos != 3){
-                //Earg(2, 0);
                 display("Error: The format should be 'createfile --file <file name and address>'");
                 continue;
             }
@@ -157,6 +362,29 @@ int main(){
             }
             else{
                 display("Error: The format should be 'createfile --file <file name and address>'");
+            }
+        }
+
+        else if(!strcmp(lineBuff[0], "insertstr")){
+            if(nos != 8){
+                display("Error: The format should be 'insertstr --file <file name> --str <str> --pos <line no>:<start position>'");
+                continue;
+            }
+            else{
+                if(handleExistence(lineBuff[2]) == 1){
+                    insertstr();
+                }
+            }
+        }
+
+        else if(!strcmp(lineBuff[0], "cat")){
+            if(nos != 3){
+                display("Error: The format should be 'cat --file <file name>'");
+            }
+            else{
+                if(handleExistence(lineBuff[2]) == 1){
+                    cat();
+                }
             }
         }
 
