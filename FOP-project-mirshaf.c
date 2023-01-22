@@ -4,9 +4,10 @@
 #include <stdlib.h> //atoi()
 //#include <unistd.h> //existDir
 #include <errno.h> //errno = 0, perror(), strerror(), ENOENT, EEXIST
-//Whenever you want to read errno to see if there are any errors, initialize it to 0 beforehend.(cuz if there is no error, errno will not be change from it's last state.
-//#include <unistd.h>
+
 /*Notes:
+This program is written for windows.
+Whenever you want to read errno to see if there are any errors, initialize it to 0 beforehend.(cuz if there is no error, errno will not be change from it's last state.
 Do not forget to put '\0' at the end of every string
 Remember to close every file when you are done with it.
 The inputs are guaranteed to be in the specified structures. And in order.
@@ -14,7 +15,8 @@ The inputs are guaranteed to be in the specified structures. And in order.
 "root/" and "root" are acceptable but "/root" is not! You must handle both inputs though.
 the input is like "/root/my.txt" instead of "root/my.txt" so I will +1 the directoryStr pointer.
 IN SHORT: there should not be a '/' at the start or the end of the directory. "/root/me.txt/" is not acceptable(vs "/root/me.txt") but should be handled.
-
+currently if there is a "--pos" in the input, there must follow a "%d:%d" even if in an invalid command.
+The cutstr command displays things twice.
 */
 
 #define maxStrInALine 15 //Assuming each line has a maximum of 10 strings and each string has less than 400 characters
@@ -267,61 +269,190 @@ int createDir(const char directory[maxDepth][maxFileNameLen], int depth){ //This
     }
 }
 
-int insertstr(){ //Uses the "lineBuff".
+int cat(){ //Uses the "lineBuff".
+    FILE *mainFile = fopen(lineBuff[2], "r");
+    char c;
+    printf("---------------------------\n");
+    while((c = fgetc(mainFile)) != EOF){
+        //if(feof(mainFile)) break;
+        printf("%c", c);
+    }
+    printf("\n---------------------------\n");
+    fclose(mainFile);
+    return 0;
+}
+
+int fileHelper(int targetLine, int targetChar){ //Fills "fileBuff.txt" and returns something good
     FILE *mainFile = fopen(lineBuff[2], "r");
     //if(mainFile == NULL) printf("GG\n");
     //printf("%s\n", lineBuff[2]);
     FILE *fileBuff = fopen("fileBuff.txt", "w");
-    int currentLine = 1, currentChar = 0, targetLine = atoi(lineBuff[6]), targetChar = atoi(lineBuff[7]);
+    int currentLine = 1, currentChar = 0;
+    int targetTotalChars = 0, f = 1;
     char c;
-    while(!feof(mainFile)){
-        if( (c = fgetc(mainFile)) != EOF){
-            fputc(c, fileBuff);
+    while((c = fgetc(mainFile)) != EOF){ // while(!feof(mainFile))
+        fputc(c, fileBuff);
 
         if(currentLine == targetLine){
+            if(currentChar == targetChar) f = 0;
             if(c!='\n') currentChar++;
         }
+        if(f) targetTotalChars++;
         if(c=='\n') currentLine++;
-
-        }
     }
     fclose(mainFile);
     fclose(fileBuff);
+
     if((currentLine >= targetLine) && (targetLine>=1)){
         if((currentChar >= targetChar) && (targetChar>=0)){
-            mainFile = fopen(lineBuff[2], "w");
-            fileBuff = fopen("fileBuff.txt", "r");
-            currentLine = 1;
-            currentChar = 0;
-
-            while(!feof(fileBuff)){
-                if(currentLine == targetLine){
-                    if(currentChar == targetChar){
-                        for(int i = 0; i < strlen(lineBuff[4]); i++){
-                            fputc(lineBuff[4][i], mainFile);
-                        }
-                    }
-                    currentChar++;
-                }
-
-                if( (c = fgetc(fileBuff)) != EOF){
-                    fputc(c, mainFile);
-                }
-                if(c=='\n') currentLine++;
-            }
-
-            fclose(mainFile);
-            fclose(fileBuff);
-            display("Inserted successfully.");
-            return 0;
+            return targetTotalChars;
         }
     }
-    display("Error: The specified position does not exist in the file. Remember that line_number is 1 based and char_number is 0 based.");
+    display("Error: The specified position does not exist in the file. Remember that line_number is 1-based and char_number is 0-based.");
     return -1;
 }
+int insertstr(){ //Uses the "lineBuff".
+    int targetLine = atoi(lineBuff[6]), targetChar = atoi(lineBuff[7]);
+    int helper = fileHelper(targetLine, targetChar);
+    if(helper >= 0){
+        FILE *mainFile = fopen(lineBuff[2], "w"), *fileBuff = fopen("fileBuff.txt", "r");
+        int currentLine = 1, currentChar = 0;
+        char c;
 
-int cat(){
+        while(!feof(fileBuff)){
+            if(currentLine == targetLine){
+                if(currentChar == targetChar){
+                    for(int i = 0; i < strlen(lineBuff[4]); i++){
+                        fputc(lineBuff[4][i], mainFile);
+                    }
+                }
+                currentChar++;
+            }
 
+            if( (c = fgetc(fileBuff)) != EOF){
+                fputc(c, mainFile);
+            }
+            if(c=='\n') currentLine++;
+        }
+
+        fclose(mainFile);
+        fclose(fileBuff);
+        display("Inserted successfully.");
+        return 0;
+    }
+    return -1;
+}
+int removestr(){ //Uses the "lineBuff". //checks for --pos to be in range, but if -size is not in range it simply goes to the end/beginning of the file
+    int targetLine = atoi(lineBuff[4]), targetChar = atoi(lineBuff[5]);
+    int helper = fileHelper(targetLine, targetChar);
+    if(helper >= 0){
+        FILE *mainFile = fopen(lineBuff[2], "w"), *fileBuff = fopen("fileBuff.txt", "r");
+        int f = 0, size = atoi(lineBuff[7]), totalChars = 0, targetTotalChars = helper;
+        if(!strcmp(lineBuff[8], "-b")) f=1;
+        char c;
+
+        while(!feof(fileBuff)){
+            if( (c = fgetc(fileBuff)) != EOF){
+                if(f){ //remove backwards
+                    if((totalChars < targetTotalChars-size) || (totalChars >= targetTotalChars)){
+                        fputc(c, mainFile);
+                    }
+                }
+                else{ //remove forwards
+                    if((totalChars < targetTotalChars) || (totalChars >= targetTotalChars+size)){
+                        fputc(c, mainFile);
+                    }
+                }
+            }
+            totalChars++;
+        }
+
+        fclose(mainFile);
+        fclose(fileBuff);
+
+        display("Removed successfully.");
+        return 0;
+    }
+    return -1;
+}
+int copystr(){ //Uses the "lineBuff".
+    int targetLine = atoi(lineBuff[4]), targetChar = atoi(lineBuff[5]);
+    int helper = fileHelper(targetLine, targetChar);
+    if(helper >= 0){
+        FILE *mainFile = fopen("clipboard.txt", "w"), *fileBuff = fopen("fileBuff.txt", "r");
+        int f = 0, size = atoi(lineBuff[7]), totalChars = 0, targetTotalChars = helper;
+        if(!strcmp(lineBuff[8], "-b")) f=1;
+        char c;
+
+        while(!feof(fileBuff)){
+            if( (c = fgetc(fileBuff)) != EOF){
+                if(f){ //remove backwards
+                    if((totalChars >= targetTotalChars-size) && (totalChars < targetTotalChars)){
+                        fputc(c, mainFile);
+                    }
+                }
+                else{ //remove forwards
+                    if((totalChars >= targetTotalChars) && (totalChars < targetTotalChars+size)){
+                        fputc(c, mainFile);
+                    }
+                }
+            }
+            totalChars++;
+            if(totalChars > targetTotalChars+size+1) break;
+        }
+
+        fclose(mainFile);
+        fclose(fileBuff);
+        display("Copied successfully.");
+        return 0;
+    }
+    return -1;
+}
+int cutstr(){
+    int a = copystr();
+    int b = removestr();
+    if((!a) && (!b)){
+        display("Cut successfully.");
+        return 0;
+    }
+    display("An error occurred.");
+    return -1;
+}
+int pastestr(){
+    int targetLine = atoi(lineBuff[4]), targetChar = atoi(lineBuff[5]);
+    int helper = fileHelper(targetLine, targetChar);
+    if(helper >= 0){
+        FILE *clipboardFile = fopen("clipboard.txt", "r");
+        if(clipboardFile == NULL){
+            display("Error: The clipboard is empty.");
+            return -1;
+        }
+        FILE *mainFile = fopen(lineBuff[2], "w"), *fileBuff = fopen("fileBuff.txt", "r");
+        int currentLine = 1, currentChar = 0;
+        char c;
+
+        while(!feof(fileBuff)){
+            if(currentLine == targetLine){
+                if(currentChar == targetChar){
+                    while((c = fgetc(clipboardFile)) != EOF){
+                        fputc(c, mainFile);
+                    }
+                }
+                currentChar++;
+            }
+
+            if( (c = fgetc(fileBuff)) != EOF){
+                fputc(c, mainFile);
+            }
+            if(c=='\n') currentLine++;
+        }
+
+        fclose(mainFile);
+        fclose(fileBuff);
+        display("Pasted successfully.");
+        return 0;
+    }
+    return -1;
 }
 
 int main(){
@@ -340,7 +471,7 @@ int main(){
         }
         printf("\n");*/
         if(nos == 0) continue;
-        else if(nos == -1) display("Error: too many words in one line.");
+        else if(nos == -1) display("Error: Too many words in one line.");
 
         else if(!strcmp(lineBuff[0], "createfile")){
             if(nos != 3){
@@ -380,10 +511,59 @@ int main(){
         else if(!strcmp(lineBuff[0], "cat")){
             if(nos != 3){
                 display("Error: The format should be 'cat --file <file name>'");
+                continue;
             }
             else{
                 if(handleExistence(lineBuff[2]) == 1){
                     cat();
+                }
+            }
+        }
+
+        else if(!strcmp(lineBuff[0], "removestr")){
+            if(nos != 9){
+                display("Error: The format should be 'removestr --file <file name> --pos <line no>:<start position> -size <number of characters to remove> -f or -b'");
+                continue;
+            }
+            else{
+                if(handleExistence(lineBuff[2]) == 1){
+                    removestr();
+                }
+            }
+        }
+
+        else if(!strcmp(lineBuff[0], "copystr")){
+            if(nos != 9){
+                display("Error: The format should be 'copystr --file <file name> --pos <line no>:<start position> -size <number of characters to remove> -f or -b'");
+                continue;
+            }
+            else{
+                if(handleExistence(lineBuff[2]) == 1){
+                    copystr();
+                }
+            }
+        }
+
+        else if(!strcmp(lineBuff[0], "cutstr")){
+            if(nos != 9){
+                display("Error: The format should be 'cutstr --file <file name> --pos <line no>:<start position> -size <number of characters to remove> -f or -b'");
+                continue;
+            }
+            else{
+                if(handleExistence(lineBuff[2]) == 1){
+                    cutstr();
+                }
+            }
+        }
+
+        else if(!strcmp(lineBuff[0], "pastestr")){
+            if(nos != 6){
+                display("Error: The format should be 'pastestr --file <file name> --pos <line no>:<start position>'");
+                continue;
+            }
+            else{
+                if(handleExistence(lineBuff[2]) == 1){
+                    pastestr();
                 }
             }
         }
