@@ -17,13 +17,16 @@ the input is like "/root/my.txt" instead of "root/my.txt" so I will +1 the direc
 IN SHORT: there should not be a '/' at the start or the end of the directory. "/root/me.txt/" is not acceptable(vs "/root/me.txt") but should be handled.
 currently if there is a "--pos" in the input, there must follow a "%d:%d" even if in an invalid command.
 if the user writes a command inside of a --str attribute for example, something might go wrong.
-The cutstr command displays things twice.
+find() and replace() may act weird for *Hi in "HiHi".
+if --pos is out of bounds then cut() will display 2 errors instead of 1.
+if two files share a name then undo() will break
 */
 
 #define maxStrInALine 15 //Assuming each line has a maximum of 10 strings and each string has less than 400 characters
 #define maxCharInAStr 400
 #define maxDepth 2*maxStrInALine
 #define maxFileNameLen maxCharInAStr/10
+#define FILEBUFFER "fileBuff.txt"
 char cwd[maxCharInAStr], lineBuff[maxStrInALine][maxCharInAStr]; //sizeof(cwd) = 400, cwd = C:\Users\John\Desktop\Folder, linebuff = {"createfile", "--file", "/root/t.e st/my.txt"}
 char directory[maxDepth][maxFileNameLen]; //For example {"C:", "Users", "John"}
 
@@ -208,6 +211,7 @@ int processLine(char lineBuff[maxStrInALine][maxCharInAStr], int nos){ //number 
 
 int parseDir(const char *in, char directory[maxDepth][maxFileNameLen]){ // must be in: '/root/dir1/dir2/file.txt' or '/root' or '/root/' format. This function manipulates the directory variable.
     //'in' mustnot be empty.
+    //returns the number of separated strings
     int i = 0, Depth = -1, FNM = 0;
     while(in[i] != '\0'){
         if(in[i] == '/'){ //Beware that we are not handling backslash
@@ -270,6 +274,54 @@ int createDir(const char directory[maxDepth][maxFileNameLen], int depth){ //This
     }
 }
 
+//Helper functions:
+int copyFile(const char source_file[maxCharInAStr], const char dest_file[maxCharInAStr]){ //If dest_file exists, it will be overwritten. source_file must exist.
+    FILE *filedst = fopen(dest_file, "w"), *filesrc = fopen(source_file, "r");
+    char c;
+    while(1){
+        c = fgetc(filesrc);
+        if(feof(filesrc)) break;
+        fputc(c, filedst);
+    }
+    fclose(filedst);
+    fclose(filesrc);
+    return 0;
+}
+int createBackup(char *fileDir, char directory[maxDepth][maxFileNameLen]){
+    getcwd(cwd, sizeof(cwd));
+    int temp = parseDir(fileDir, directory);
+    /*FILE *fromFile = fopen(fileDir, "r"), *toFile = fopen(directory[temp-1], "w");
+
+    char c;
+    while(1){
+        c = fgetc(fromFile);
+        if(feof(fromFile)) break;
+        fputc(c, toFile);
+    }
+
+    fclose(fromFile);
+    fclose(toFile);*/
+    copyFile(fileDir, directory[temp-1]);
+    return 0;
+}
+int revertFile(const char *fileDir, char directory[maxDepth][maxFileNameLen]){ //Assumes fileDir exists and is a file.
+    getcwd(cwd, sizeof(cwd));
+    int temp = parseDir(fileDir, directory);
+    FILE *backupFile = fopen(directory[temp-1], "r");
+    if(backupFile == NULL){
+        fclose(backupFile);
+        return -1; //There is no backup.
+    }
+    fclose(backupFile);
+
+    copyFile(fileDir, FILEBUFFER); //mainFile to fileBuff
+    copyFile(directory[temp-1], fileDir); //Backup to mainFile
+    copyFile(FILEBUFFER, directory[temp-1]); //fileBuff to backup
+
+    return 0;
+}
+
+
 int cat(){ //Uses the "lineBuff".
     FILE *mainFile = fopen(lineBuff[2], "r");
     char c;
@@ -316,6 +368,8 @@ int insertstr(){ //Uses the "lineBuff".
     int targetLine = atoi(lineBuff[6]), targetChar = atoi(lineBuff[7]);
     int helper = fileHelper(targetLine, targetChar);
     if(helper >= 0){
+        createBackup(lineBuff[2], directory); //For the Undo command
+
         FILE *mainFile = fopen(lineBuff[2], "w"), *fileBuff = fopen("fileBuff.txt", "r");
         int currentLine = 1, currentChar = 0;
         char c;
@@ -347,6 +401,8 @@ int removestr(){ //Uses the "lineBuff". //checks for --pos to be in range, but i
     int targetLine = atoi(lineBuff[4]), targetChar = atoi(lineBuff[5]);
     int helper = fileHelper(targetLine, targetChar);
     if(helper >= 0){
+        createBackup(lineBuff[2], directory); //For the Undo command
+
         FILE *mainFile = fopen(lineBuff[2], "w"), *fileBuff = fopen("fileBuff.txt", "r");
         int f = 0, size = atoi(lineBuff[7]), totalChars = 0, targetTotalChars = helper;
         if(!strcmp(lineBuff[8], "-b")) f=1;
@@ -371,7 +427,6 @@ int removestr(){ //Uses the "lineBuff". //checks for --pos to be in range, but i
         fclose(mainFile);
         fclose(fileBuff);
 
-        display("Removed successfully.");
         return 0;
     }
     return -1;
@@ -404,7 +459,6 @@ int copystr(){ //Uses the "lineBuff".
 
         fclose(mainFile);
         fclose(fileBuff);
-        display("Copied successfully.");
         return 0;
     }
     return -1;
@@ -413,10 +467,8 @@ int cutstr(){
     int a = copystr();
     int b = removestr();
     if((!a) && (!b)){
-        display("Cut successfully.");
         return 0;
     }
-    display("An error occurred.");
     return -1;
 }
 int pastestr(){
@@ -428,6 +480,9 @@ int pastestr(){
             display("Error: The clipboard is empty.");
             return -1;
         }
+
+        createBackup(lineBuff[2], directory); //For the Undo command
+
         FILE *mainFile = fopen(lineBuff[2], "w"), *fileBuff = fopen("fileBuff.txt", "r");
         int currentLine = 1, currentChar = 0;
         char c;
@@ -456,8 +511,8 @@ int pastestr(){
     return -1;
 }
 
-int FINDByword(int charNum){ //zero based. words are separated by space or \n or \t
-    FILE *mainFile = fopen(lineBuff[4], "r");
+int FINDByword(int charNum, const char file_name[maxCharInAStr]){ //zero based. words are separated by space or \n or \t
+    FILE *mainFile = fopen(file_name, "r");
     int counter = 0, wordCounter = 0;
     char c, temp = ' ';
 
@@ -485,11 +540,15 @@ int FINDHandleBackslash(char *str){
     str[counter] = '\0';
     return 0;
 }
-int simpleFIND(int from){ //cannot handle a wildcard in the middle of str.
+int simpleFIND(int from, const char file_name[maxCharInAStr], const char the_constant_str[maxCharInAStr], int pos[2]){ //cannot handle a wildcard in the middle of str.
+    //pos[0] is where the found string begins and pos[1] is where it ends. it is to be filled by this function.
     //cannot find "app apple" in "app app apple apple" because it does not overlap.
     //MUST NOT CHANGE lineBuffer
-    FILE *mainFile = fopen(lineBuff[4], "r");
-    char c, *str = lineBuff[2];
+    char the_str[maxCharInAStr];
+    strcpy(the_str, the_constant_str); //Used this trick to be able to declare the_constant_str as a const
+
+    FILE *mainFile = fopen(file_name, "r");
+    char c, *str = the_str;
     int counter = 0, similarity = 0;
 
     if( (str[strlen(str)-1] == '*') && ((strlen(str)<=1) || (str[strlen(str)-2] != '\\')) ){ //if the str ends with a wildcard (not a "\*")
@@ -498,11 +557,19 @@ int simpleFIND(int from){ //cannot handle a wildcard in the middle of str.
         while(1){
             if(similarity == strlen(str)){
                 flag = 1;
-                if((c = fgetc(mainFile)) != EOF){
+                /*if((c = fgetc(mainFile)) != EOF){
                     if(c != ' '){
                         return counter-similarity;
                     }
+                }*/
+                pos[0] = counter - similarity;
+                while((c = fgetc(mainFile)) != EOF){
+                    if((c == ' ') || (c == '\n') || (c == '\t')) break;
+                    counter++;
                 }
+                pos[1] = counter - 1;
+                fclose(mainFile);
+                return pos[0]; //comment this line and uncomment the above if the wildcard can't be empty.
                 similarity = 0;
             }
 
@@ -530,20 +597,25 @@ int simpleFIND(int from){ //cannot handle a wildcard in the middle of str.
             c = fgetc(mainFile);
 
             if(similarity == strlen(str)){
-                if((counter-similarity == 0) || (temp != ' ')){
+                /*if((counter-similarity == 0) || (temp != ' ')){
                     //return counter - similarity;
                     return lastSpace;
-                }
+                }*/
+                pos[0] = lastSpace;
+                pos[1] = counter - 1;
+                fclose(mainFile);
+                return pos[0]; //comment this line and uncomment the above if the wildcard can't be empty.
                 similarity = 0;
             }
 
             if((counter>=from) && (str[similarity] == c)){
                 similarity++;
+                counter++;
             }
             else{
                 temp = c;
                 counter++;
-                counter += similarity;
+                //counter += similarity;
                 similarity = 0;
             }
 
@@ -558,7 +630,10 @@ int simpleFIND(int from){ //cannot handle a wildcard in the middle of str.
             c = fgetc(mainFile);
 
             if(similarity == strlen(str)){ //Previous bug: this if statement should be checked even if c==EOF.
-                return counter-similarity;
+                pos[0] = counter - similarity;
+                pos[1] = counter - 1;
+                fclose(mainFile);
+                return pos[0];
             }
             if((counter>=from) && (str[similarity] == c)){
                 similarity++;
@@ -575,7 +650,7 @@ int simpleFIND(int from){ //cannot handle a wildcard in the middle of str.
 
     fclose(mainFile);
 }
-int findInFile(int nos){ //number of strings. WARNING: THIS FUNCTION USES PRINTF() INSTEAD OF DISPLAY()
+int findInFile(int nos, const char file_name[maxCharInAStr], const char the_str[maxCharInAStr]){ //number of strings. WARNING: THIS FUNCTION USES PRINTF() INSTEAD OF DISPLAY(). WARNING: Still needs access to lineBuff to check for flags.
     int fCount = 0, fAt = 0, fByword = 0, fAll = 0, atWhere;
     for(int i = 0; i < nos; i++){
         if(!strcmp(lineBuff[i], "-count")) fCount = 1;
@@ -599,42 +674,42 @@ int findInFile(int nos){ //number of strings. WARNING: THIS FUNCTION USES PRINTF
         }
     }
 
-
+    int pos[2]; //This is not needed for findInFile() but needs to be passed to simpleFind().
     if(!fCount && !fAt && !fAll){
-        int temp = simpleFIND(0);
-        if(fByword) temp = FINDByword(temp);
+        int temp = simpleFIND(0, file_name, the_str, pos);
+        if(fByword) temp = FINDByword(temp, file_name);
         printf("<%d>\n", temp);
         return 0;
     }
     else if(fCount){
         int count = 0, from = 0, temp;
-        while((temp = simpleFIND(from)) != -1){
+        while((temp = simpleFIND(from, file_name, the_str, pos)) != -1){
             count++;
-            from = temp + 1;
+            from = pos[1]+1; //from = temp + 1;
         }
         printf("<%d>\n", count);
         return 0;
     }
     else if(fAt){
         int count = 0, from = 0, temp;
-        while((temp = simpleFIND(from)) != -1){
+        while((temp = simpleFIND(from, file_name, the_str, pos)) != -1){
             count++;
-            from = temp + 1;
+            from = pos[1]+1;
             if(count == atWhere) break;
         }
         if((count < atWhere) || (temp == -1)) display("<-1>");
         else{
-            if(fByword) temp = FINDByword(temp);
+            if(fByword) temp = FINDByword(temp, file_name);
             printf("<%d>\n", temp);
         }
         return 0;
     }
     else if(fAll){
         int count = 0, from = 0, temp;
-        while((temp = simpleFIND(from)) != -1){
+        while((temp = simpleFIND(from, file_name, the_str, pos)) != -1){
             count++;
-            from = temp + 1;
-            if(fByword) temp = FINDByword(temp);
+            from = from = pos[1]+1;
+            if(fByword) temp = FINDByword(temp, file_name);
             printf("<%d> ", temp);
         }
         if(count<1) printf("<-1>");
@@ -644,7 +719,8 @@ int findInFile(int nos){ //number of strings. WARNING: THIS FUNCTION USES PRINTF
 
     return -1;
 }
-int replaceInFile(int nos){ //number of strings.
+int replaceInFile(int nos, const char file_name[maxCharInAStr], const char initialStr[maxCharInAStr], const char finalStr[maxCharInAStr]){ //WARNING: Still needs access to lineBuff to check for flags.
+    //nos==number of strings.
     int fAt = 0, fAll = 0, atWhere = 1;
     for(int i = 0; i < nos; i++){
         if(!strcmp(lineBuff[i], "-at")){
@@ -654,27 +730,102 @@ int replaceInFile(int nos){ //number of strings.
         if(!strcmp(lineBuff[i], "-all")) fAll = 1;
     }
     if(fAt && fAll){
-        display("Error: -at and -all cannot come together.");
+        display("Error: Invalid combination of flags. [-at] and [-all] cannot come together.");
         return 0;
     }
 
+
     if(fAll){
+        int count = 0, from = 0, temp, pos[2], BackUpFlag = 0;
+        while((temp = simpleFIND(0, file_name, initialStr, pos)) != -1){
+            if(BackUpFlag == 0){
+                createBackup(file_name, directory); //For the Undo command
+                BackUpFlag = 1;
+            }
 
+            count++;
+            from = pos[1]+1;
+
+            //Replacing process:
+            copyFile(file_name, FILEBUFFER); //mainFile to fileBuff
+
+            int tempCounter = 0;
+            FILE *fileBuff = fopen(FILEBUFFER, "r"), *mainFile = fopen(file_name, "w");
+            char c;
+            while(1){
+                if(tempCounter == temp){
+                    for(int i = 0; i < strlen(finalStr); i++){
+                        fputc(finalStr[i], mainFile);
+                    }
+                }
+
+                c = fgetc(fileBuff);
+                if(feof(fileBuff)) break;
+                if((tempCounter < pos[0]) || (pos[1] < tempCounter)){ //temp is where the initialStr begins.
+                    fputc(c, mainFile);
+                }
+                tempCounter++;
+            }
+            fclose(mainFile);
+            fclose(fileBuff);
+        }
+        if(count<1){
+            display("Error: The initial string was not found in the file.");
+            return -1;
+        }
+        display("Replaced successfully.");
+        return 0;
     }
-    else{
+    else { //if there's not -all then there must be -at
+        int count = 0, from = 0, temp, pos[2];
+        while((temp = simpleFIND(from, file_name, initialStr, pos)) != -1){
+            count++;
+            from = pos[1]+1;
+            if(count == atWhere) break;
+        }
+        if((count < atWhere) || (temp == -1)){
+            display("Error: There are not enough iterations of the initial string in the file.");
+            return -1;
+        }
+        else{
+            createBackup(file_name, directory); //For the Undo command
 
+            //Replacing process:
+            copyFile(file_name, FILEBUFFER); //mainFile to fileBuff
+
+            int tempCounter = 0;
+            FILE *fileBuff = fopen(FILEBUFFER, "r"), *mainFile = fopen(file_name, "w");
+            char c;
+            while(1){
+                if(tempCounter == temp){
+                    for(int i = 0; i < strlen(finalStr); i++){
+                        fputc(finalStr[i], mainFile);
+                    }
+                }
+
+                c = fgetc(fileBuff);
+                if(feof(fileBuff)) break;
+                if((tempCounter < pos[0]) || (pos[1] < tempCounter)){ //temp is where the initialStr begins.
+                    fputc(c, mainFile);
+                }
+                tempCounter++;
+            }
+            fclose(mainFile);
+            fclose(fileBuff);
+
+            display("Replaced successfully.");
+            return 0;
+        }
     }
 }
 
-int createBackup(char *fileDir){
-
-}
 
 int main(){
     //Display how to use
     display("Welcome to Mirshaf's Vim.");
-    display("Notes for the find command:\n\t-uses zero-based indexing except for the -at flag.\n\t-Whitespace(space, tab, newline) is supported.\n\t-Wildcards can come at the beginning or the end of the string. '\\*' is supported anywhere.");
-    display("Each command must come in exactly one line; however you can write '\\n'.\n");
+    display("-Notes for the find command:\n\t-Whitespace(space, tab, newline) is supported.\n\t-Wildcards can come at the beginning or the end of the string. '\\*' is supported anywhere.");
+    display("-Everything uses zero-based indexing except for the -at flag and <line no>");
+    display("-Each command must come in exactly one line; however you can write '\\n'.\n");
 
     //Create Root
     getcwd(cwd, sizeof(cwd)); //can handle dot?
@@ -748,7 +899,8 @@ int main(){
             }
             else{
                 if(handleExistence(lineBuff[2]) == 1){
-                    removestr();
+                    if(removestr() == 0) display("Removed successfully.");
+                    //else display("Something went wrong.");
                 }
             }
         }
@@ -760,7 +912,8 @@ int main(){
             }
             else{
                 if(handleExistence(lineBuff[2]) == 1){
-                    copystr();
+                    if(copystr() == 0) display("Copied successfully.");
+                    //else display("Something went wrong.");
                 }
             }
         }
@@ -772,7 +925,8 @@ int main(){
             }
             else{
                 if(handleExistence(lineBuff[2]) == 1){
-                    cutstr();
+                    if(cutstr() == 0) display("Cut successfully.");
+                    else display("Something went wrong.");
                 }
             }
         }
@@ -796,23 +950,36 @@ int main(){
             }
             else{
                 if(handleExistence(lineBuff[4]) == 1){
-                    findInFile(nos);
+                    findInFile(nos, lineBuff[4], lineBuff[2]);
                 }
             }
         }
 
         else if(!strcmp(lineBuff[0], "replace")){
-            if((nos != 7) && (nos != 8)){
-                display("Error: The format should be 'replace --str1 <str> --str2 <str> --file <file name> [-at <num> | -all]'");
+            if((nos != 7) && (nos != 8) && (nos != 9)){
+                display("Error: The format should be 'replace --str1 <initial str> --str2 <final str> --file <file name> [-at <num> | -all]'");
                 continue;
             }
             else{
                 if(handleExistence(lineBuff[6]) == 1){
-                    //replaceInFile(nos);
-                    display("Command not implemented.");
+                    replaceInFile(nos, lineBuff[6], lineBuff[2], lineBuff[4]);
                 }
             }
         }
+
+        else if(!strcmp(lineBuff[0], "undo")){
+            if(nos != 3){
+                display("Error: The format should be 'undo --file <file>'");
+                continue;
+            }
+            else{
+                if(handleExistence(lineBuff[2]) == 1){
+                    if(revertFile(lineBuff[2], directory) == 0) display("Undid successfully.");
+                    else display("Error: There have been no changes to this file.");
+                }
+            }
+        }
+
 
         else{
             display("invalid command");
