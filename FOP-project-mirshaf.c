@@ -16,6 +16,7 @@ The inputs are guaranteed to be in the specified structures. And in order.
 the input is like "/root/my.txt" instead of "root/my.txt" so I will +1 the directoryStr pointer.
 IN SHORT: there should not be a '/' at the start or the end of the directory. "/root/me.txt/" is not acceptable(vs "/root/me.txt") but should be handled.
 currently if there is a "--pos" in the input, there must follow a "%d:%d" even if in an invalid command.
+if the user writes a command inside of a --str attribute for example, something might go wrong.
 The cutstr command displays things twice.
 */
 
@@ -69,7 +70,7 @@ int existFile(const char * const fname){ //can get either absolute or relative p
     }
     return 0;
 }
-int handleExistence(char *path){ //Can change the path section of "lineBuff"
+int handleExistence(char *path){ //Can change the path section of "lineBuff". Currently IS NECESSARY FOR CORRECTING THE PATH.
     //Warning: the following might cause memory leak.
     if(path[0] == '/'){
         char temp[maxCharInAStr];
@@ -455,13 +456,233 @@ int pastestr(){
     return -1;
 }
 
+int FINDByword(int charNum){ //zero based. words are separated by space or \n or \t
+    FILE *mainFile = fopen(lineBuff[4], "r");
+    int counter = 0, wordCounter = 0;
+    char c, temp = ' ';
+
+    while((c = fgetc(mainFile)) != EOF){
+        if( ((c == ' ') || (c == '\n') || (c == '\t')) && (temp != ' ') && (temp != '\n') && (temp != '\t')) wordCounter++;
+        counter++;
+        if(counter >= charNum) break;
+        temp = c;
+    }
+
+    fclose(mainFile);
+    return wordCounter;
+}
+int FINDHandleBackslash(char *str){
+    int counter = 0;
+    for(int i = 0; i < strlen(str); i++){
+        if(str[i] != '*'){
+            str[counter] = str[i];
+            counter++;
+        }
+        else if(i>=1 && (str[i-1] == '\\')){
+            str[counter-1] = str[i];
+        }
+    }
+    str[counter] = '\0';
+    return 0;
+}
+int simpleFIND(int from){ //cannot handle a wildcard in the middle of str.
+    //cannot find "app apple" in "app app apple apple" because it does not overlap.
+    //MUST NOT CHANGE lineBuffer
+    FILE *mainFile = fopen(lineBuff[4], "r");
+    char c, *str = lineBuff[2];
+    int counter = 0, similarity = 0;
+
+    if( (str[strlen(str)-1] == '*') && ((strlen(str)<=1) || (str[strlen(str)-2] != '\\')) ){ //if the str ends with a wildcard (not a "\*")
+        FINDHandleBackslash(str); //Changes 'str' but not lineBuff[2]
+        int flag = 0;
+        while(1){
+            if(similarity == strlen(str)){
+                flag = 1;
+                if((c = fgetc(mainFile)) != EOF){
+                    if(c != ' '){
+                        return counter-similarity;
+                    }
+                }
+                similarity = 0;
+            }
+
+            if(!flag) c = fgetc(mainFile);
+            flag = 0;
+
+            if((counter>=from) && (str[similarity] == c)){
+                similarity++;
+            }
+            else{
+                similarity = 0;
+            }
+            counter++;
+
+            if(c == EOF) break;
+        }
+        return -1;
+    }
+    else if(str[0] == '*'){ //if the str begins with a wildcard (not a "\*")
+        FINDHandleBackslash(str); //Changes 'str' but not lineBuff[2]
+        int lastSpace = 0;
+        similarity = 0;
+        char temp;
+        while(1){
+            c = fgetc(mainFile);
+
+            if(similarity == strlen(str)){
+                if((counter-similarity == 0) || (temp != ' ')){
+                    //return counter - similarity;
+                    return lastSpace;
+                }
+                similarity = 0;
+            }
+
+            if((counter>=from) && (str[similarity] == c)){
+                similarity++;
+            }
+            else{
+                temp = c;
+                counter++;
+                counter += similarity;
+                similarity = 0;
+            }
+
+            if(c == ' ') lastSpace = counter;
+            if(c == EOF) break;
+        }
+        return -1;
+    }
+    else{ //no wildcard
+        FINDHandleBackslash(str);
+        while(1){
+            c = fgetc(mainFile);
+
+            if(similarity == strlen(str)){ //Previous bug: this if statement should be checked even if c==EOF.
+                return counter-similarity;
+            }
+            if((counter>=from) && (str[similarity] == c)){
+                similarity++;
+            }
+            else{
+                similarity = 0;
+            }
+            counter++;
+
+            if(c == EOF) break;
+        }
+        return -1;
+    }
+
+    fclose(mainFile);
+}
+int findInFile(int nos){ //number of strings. WARNING: THIS FUNCTION USES PRINTF() INSTEAD OF DISPLAY()
+    int fCount = 0, fAt = 0, fByword = 0, fAll = 0, atWhere;
+    for(int i = 0; i < nos; i++){
+        if(!strcmp(lineBuff[i], "-count")) fCount = 1;
+        if(!strcmp(lineBuff[i], "-at")){
+            fAt = 1;
+            atWhere = atoi(lineBuff[i + 1]);
+        }
+        if(!strcmp(lineBuff[i], "-byword")) fByword = 1;
+        if(!strcmp(lineBuff[i], "-all")) fAll = 1;
+    }
+    if(fCount){
+        if(fAt || fByword || fAll){
+            display("Error: Invalid combination of flags. [-count] cannot be accompanied by another flag.");
+            return 0;
+        }
+    }
+    if(fAt){
+        if(fAll){
+            display("Error: Invalid combination of flags. [-at] and [-all] cannot come together.");
+            return 0;
+        }
+    }
+
+
+    if(!fCount && !fAt && !fAll){
+        int temp = simpleFIND(0);
+        if(fByword) temp = FINDByword(temp);
+        printf("<%d>\n", temp);
+        return 0;
+    }
+    else if(fCount){
+        int count = 0, from = 0, temp;
+        while((temp = simpleFIND(from)) != -1){
+            count++;
+            from = temp + 1;
+        }
+        printf("<%d>\n", count);
+        return 0;
+    }
+    else if(fAt){
+        int count = 0, from = 0, temp;
+        while((temp = simpleFIND(from)) != -1){
+            count++;
+            from = temp + 1;
+            if(count == atWhere) break;
+        }
+        if((count < atWhere) || (temp == -1)) display("<-1>");
+        else{
+            if(fByword) temp = FINDByword(temp);
+            printf("<%d>\n", temp);
+        }
+        return 0;
+    }
+    else if(fAll){
+        int count = 0, from = 0, temp;
+        while((temp = simpleFIND(from)) != -1){
+            count++;
+            from = temp + 1;
+            if(fByword) temp = FINDByword(temp);
+            printf("<%d> ", temp);
+        }
+        if(count<1) printf("<-1>");
+        printf("\n");
+        return 0;
+    }
+
+    return -1;
+}
+int replaceInFile(int nos){ //number of strings.
+    int fAt = 0, fAll = 0, atWhere = 1;
+    for(int i = 0; i < nos; i++){
+        if(!strcmp(lineBuff[i], "-at")){
+            fAt = 1;
+            atWhere = atoi(lineBuff[i + 1]);
+        }
+        if(!strcmp(lineBuff[i], "-all")) fAll = 1;
+    }
+    if(fAt && fAll){
+        display("Error: -at and -all cannot come together.");
+        return 0;
+    }
+
+    if(fAll){
+
+    }
+    else{
+
+    }
+}
+
+int createBackup(char *fileDir){
+
+}
+
 int main(){
+    //Display how to use
+    display("Welcome to Mirshaf's Vim.");
+    display("Notes for the find command:\n\t-uses zero-based indexing except for the -at flag.\n\t-Whitespace(space, tab, newline) is supported.\n\t-Wildcards can come at the beginning or the end of the string. '\\*' is supported anywhere.");
+    display("Each command must come in exactly one line; however you can write '\\n'.\n");
+
     //Create Root
     getcwd(cwd, sizeof(cwd)); //can handle dot?
     //printf("%s, %d\n", cwd, sizeof(cwd));
     strcat(cwd, "/root"); // Beware of \ vs \\ . l
     mkdir(cwd); //returns 0 if successful and -1 otherwise
 
+    //Main loop
     while(1){
         int nos = getline(lineBuff); //Number of strings(words)
         processLine(lineBuff, nos);
@@ -564,6 +785,31 @@ int main(){
             else{
                 if(handleExistence(lineBuff[2]) == 1){
                     pastestr();
+                }
+            }
+        }
+
+        else if(!strcmp(lineBuff[0], "find")){
+            if(nos < 5){
+                display("Error: The format should be 'find --str <str> --file <file name> [-count or -at <num> or -byword or -all or an acceptable combination of them]'");
+                continue;
+            }
+            else{
+                if(handleExistence(lineBuff[4]) == 1){
+                    findInFile(nos);
+                }
+            }
+        }
+
+        else if(!strcmp(lineBuff[0], "replace")){
+            if((nos != 7) && (nos != 8)){
+                display("Error: The format should be 'replace --str1 <str> --str2 <str> --file <file name> [-at <num> | -all]'");
+                continue;
+            }
+            else{
+                if(handleExistence(lineBuff[6]) == 1){
+                    //replaceInFile(nos);
+                    display("Command not implemented.");
                 }
             }
         }
