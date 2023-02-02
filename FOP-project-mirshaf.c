@@ -19,7 +19,7 @@ currently if there is a "--pos" in the input, there must follow a "%d:%d" even i
 if the user writes a command inside of a --str attribute for example, something might go wrong.
 find() and replace() may act weird for *Hi in "HiHi".
 if --pos is out of bounds then cut() will display 2 errors instead of 1.
-if two files share a name then undo() will break
+if two files share a name then undo() will break. To fix this you can create an identical full directory to root and backup everything there.
 */
 
 #define maxStrInALine 15 //Assuming each line has a maximum of 10 strings and each string has less than 400 characters
@@ -287,7 +287,7 @@ int copyFile(const char source_file[maxCharInAStr], const char dest_file[maxChar
     fclose(filesrc);
     return 0;
 }
-int createBackup(char *fileDir, char directory[maxDepth][maxFileNameLen]){
+int createBackup(const char *fileDir, char directory[maxDepth][maxFileNameLen]){
     getcwd(cwd, sizeof(cwd));
     int temp = parseDir(fileDir, directory);
     /*FILE *fromFile = fopen(fileDir, "r"), *toFile = fopen(directory[temp-1], "w");
@@ -819,6 +819,61 @@ int replaceInFile(int nos, const char file_name[maxCharInAStr], const char initi
     }
 }
 
+int myGrep(int flagL, int flagC, const char str[maxCharInAStr], const char file_name[maxCharInAStr]){ //WARNING: uses printf(). return value is not standard.
+    int pos[2];
+    if(flagL){
+        if(simpleFIND(0, file_name, str, pos) != -1){
+            printf("%s\n", file_name);
+            return 1;
+        }
+        return -1;
+    }
+    else{
+        int from = 0, charCounter = 0, ansCounter = 0, currentLine = 1, lastLine = 0, temp;
+        long int firstCharInLine = 0;
+        char c;
+        while((temp = simpleFIND(from, file_name, str, pos)) != -1){
+            //printf("AAA\n");
+            FILE *mainFile = fopen(file_name, "r");
+
+            charCounter = 0;
+            currentLine = 1;
+
+            while((c = fgetc(mainFile)) != EOF){
+                //printf("<%c>", c);
+                if(charCounter == temp){
+                    if(currentLine > lastLine){
+                        lastLine = currentLine;
+                        ansCounter++;
+                        if(!flagC){
+                            printf("%s: ", file_name);
+                            long whereWereWe = ftell(mainFile);
+                            fseek(mainFile, firstCharInLine, SEEK_SET);
+                            char temporaryChar;
+                            while((temporaryChar = fgetc(mainFile)) != EOF){
+                                printf("%c", temporaryChar);
+                                if(temporaryChar == '\n') break;
+                            }
+                            if(temporaryChar != '\n') printf("\n");
+                            fseek(mainFile, whereWereWe, SEEK_SET);
+
+                        }
+                    }
+                    break;
+                }
+                if(c == '\n'){
+                    currentLine++;
+                    firstCharInLine = ftell(mainFile);
+                }
+                charCounter++;
+            }
+            fclose(mainFile);
+            from = pos[1];
+        }
+        return ansCounter;
+
+    }
+}
 
 int main(){
     //Display how to use
@@ -980,6 +1035,39 @@ int main(){
             }
         }
 
+        else if(!strcmp(lineBuff[0], "grep")){
+            if(nos < 5){
+                display("Error: The format should be 'grep [-c | -l] --str <pattern> --files [<file1> <file2> <file3> ...]'");
+                continue;
+            }
+            else{
+                int flagL = 0, flagC = 0, haveReachedFiles = 0, whereIsStr = 2, counter = 0;
+                for(int i = 0; i < nos; i++){
+                    if(!haveReachedFiles){
+                        if(!strcmp(lineBuff[i], "-l")) flagL = 1;
+                        else if(!strcmp(lineBuff[i], "-c")) flagC = 1;
+                    }
+                    else{
+                        if(handleExistence(lineBuff[i]) == 1){
+                            int temp = myGrep(flagL, flagC, lineBuff[whereIsStr], lineBuff[i]);
+                            if(temp > 0){
+                                counter += temp;
+                            }
+                        }
+                    }
+                    if(!strcmp(lineBuff[i], "--files")){
+                        haveReachedFiles = 1;
+                        if(flagL && flagC){
+                            display("Error: The [-c] and [-l] flags cannot come together.");
+                            break;
+                        }
+                        else if(flagL || flagC) whereIsStr = 3;
+                    }
+                }
+                if(flagC && !flagL) printf("%d\n", counter); //Warning: printf()
+                if((!flagC) && (counter == 0)) display("No match found.");
+            }
+        }
 
         else{
             display("invalid command");
