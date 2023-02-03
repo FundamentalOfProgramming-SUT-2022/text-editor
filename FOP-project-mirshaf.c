@@ -1,9 +1,10 @@
 #include <stdio.h>
-#include <sys/stat.h> //getcwd() mkdir() ...
+#include <sys/stat.h> //getcwd(), mkdir(), struct stat, stat(), S_ISDIR, things used in recursivetree(), ...
 #include <string.h> //strcmp()
 #include <stdlib.h> //atoi()
 //#include <unistd.h> //existDir
 #include <errno.h> //errno = 0, perror(), strerror(), ENOENT, EEXIST
+#include <dirent.h> //struct dirent, DIR, readdir(), things used in recursivetree(), ...
 
 /*Notes:
 This program is written for windows.
@@ -19,17 +20,18 @@ currently if there is a "--pos" in the input, there must follow a "%d:%d" even i
 if the user writes a command inside of a --str attribute for example, something might go wrong.
 find() and replace() may act weird for *Hi in "HiHi".
 if --pos is out of bounds then cut() will display 2 errors instead of 1.
-if two files share a name then undo() will break. To fix this you can create an identical full directory to root and backup everything there.
+if two files share a name then undo() will break. To fix this you can create a full directory identical to root and backup everything there.
+BRUH somethings wrong with createdir --file /root/dir/file.txt
 */
 
-#define maxStrInALine 15 //Assuming each line has a maximum of 10 strings and each string has less than 400 characters
-#define maxCharInAStr 400
+#define maxStrInALine 25 //Assuming each line has a maximum of 10 strings and each string has less than 400 characters
+#define maxCharInAStr 450
 #define maxDepth 2*maxStrInALine
 #define maxFileNameLen maxCharInAStr/10
 #define FILEBUFFER "fileBuff.txt"
 char cwd[maxCharInAStr], lineBuff[maxStrInALine][maxCharInAStr]; //sizeof(cwd) = 400, cwd = C:\Users\John\Desktop\Folder, linebuff = {"createfile", "--file", "/root/t.e st/my.txt"}
 char directory[maxDepth][maxFileNameLen]; //For example {"C:", "Users", "John"}
-
+int forArmanFeature;
 
 void display(char *message){
     if(message[0] == '\0'){
@@ -875,12 +877,269 @@ int myGrep(int flagL, int flagC, const char str[maxCharInAStr], const char file_
     }
 }
 
+int indentFile(const char file_name[maxCharInAStr]){ //introduced fileBuff2
+    copyFile(file_name, "fileBuff2.txt");
+    FILE *mainFile = fopen(file_name, "w"), *fileBuff = fopen(FILEBUFFER, "w"), *copyOfMainFile = fopen("fileBuff2.txt", "r");
+    char c, lastNonWhiteChar = ' ';
+    int howDeep = 0, shouldClosingGetNL = 0;
+    while((c = fgetc(copyOfMainFile)) != EOF){
+
+        if((c == '\n') || (lastNonWhiteChar != '}')) shouldClosingGetNL = 1; //This is to fix "int main() { if (1 == 1){printf(“Hello world”);} }"
+        else shouldClosingGetNL = 0;
+
+        if((c != ' ') && (c != '\t') && (c != '\n')){
+
+            if((lastNonWhiteChar == '}') && (c != '}')){ //This is to fix "int main() { if (1 == 1){printf(“Hello world”);} }"
+            for(int i = 0; i < howDeep; i++){
+                fputc('\t', mainFile);
+            }
+            }
+
+            if((c != '{') && (c != '}')){
+                if((lastNonWhiteChar != '{') && (lastNonWhiteChar != '}')){
+                    //Write the previous whitespace:
+                    fclose(fileBuff);
+                    fileBuff = fopen(FILEBUFFER, "r");
+                    char c2;
+                    while((c2 = fgetc(fileBuff)) != EOF){
+                        fputc(c2, mainFile);
+                    }
+                    fclose(fileBuff);
+                    fileBuff = fopen(FILEBUFFER, "w");
+                }
+                else{
+                    //Erase the previous whitespace:
+                    fclose(fileBuff);
+                    fileBuff = fopen(FILEBUFFER, "w");
+                }
+
+                fputc(c, mainFile);
+            }
+        }
+        else{
+            fputc(c, fileBuff);
+        }
+
+        if(c == '{'){
+            if((lastNonWhiteChar != ' ') && (lastNonWhiteChar != '{')){
+                fputc(' ', mainFile);
+
+                //Erase the previous whitespace:
+                fclose(fileBuff);
+                fileBuff = fopen(FILEBUFFER, "w");
+            }
+            fputc('{', mainFile);
+
+            howDeep++;
+            fputc('\n', mainFile);
+            for(int i = 0; i < howDeep; i++){
+                fputc('\t', mainFile);
+            }
+        }
+        else if(c == '}'){
+            //if(lastNonWhiteChar == '{'){
+            //    fputc('\n', mainFile);
+            //}
+            if(shouldClosingGetNL == 1) {fputc('\n', mainFile);}
+            howDeep--;
+            for(int i = 0; i < howDeep; i++){
+                fputc('\t', mainFile);
+            }
+            fputc('}', mainFile);
+            fputc('\n', mainFile);
+        }
+
+        if((c != ' ') && (c != '\t') && (c != '\n')){
+            lastNonWhiteChar = c;
+        }
+    }
+
+    fclose(mainFile);
+    fclose(fileBuff);
+    fclose(copyOfMainFile);
+    return 0;
+}
+
+int howManyLines(const char file_name[maxCharInAStr]){
+    FILE *mainFile = fopen(file_name, "r");
+    int lineNum = 1;
+    char c;
+    while((c = fgetc(mainFile)) != EOF){
+        if(c == '\n') lineNum++;
+    }
+
+    fclose(mainFile);
+    return lineNum;
+}
+int displayLineOfFile(int lineNum, const char file_name[maxCharInAStr]){ //WARNING: Uses printf(). assumes file_name exists.
+    FILE *mainFile = fopen(file_name, "r");
+    int currentLine = 1;
+    char c;
+    while((c = fgetc(mainFile)) != EOF){
+        if(c == '\n'){
+            currentLine++;
+            if(currentLine == (lineNum+1)){
+                printf("\n");
+                fclose(mainFile);
+                return 0;
+            }
+        }
+        if(currentLine == lineNum){
+            if(c != '\n') printf("%c", c);
+        }
+    }
+
+    fclose(mainFile);
+    if(currentLine == lineNum){
+        printf("\n");
+        return 0;
+    }
+    else return -1;
+}
+int textComparator(const char file_name1[maxCharInAStr], const char file_name2[maxCharInAStr]){ //WARNING: Uses printf()
+    FILE *file1 = fopen(file_name1, "r"), *file2 = fopen(file_name2, "r");
+    int charNum1= 0, charNum2 = 0, lineNum1 = 1, lineNum2 = 1, eof1 = 0, eof2 = 0, theFilesAreTheSame = 1;
+    char c1, c2, prevC1, prevC2;
+    while(1){
+        prevC1 = c1;
+        prevC2 = c2;
+        c1 = fgetc(file1);
+        c2 = fgetc(file2);
+
+        if((c1 != c2)){
+            theFilesAreTheSame = 0;
+
+            if( (!((c1 == EOF) && (c2 == '\n'))) && (!((c2 == EOF) && (c1 == '\n'))) ){
+                printf("============ #<%d> ============\n", lineNum1);
+                displayLineOfFile(lineNum1, file_name1);
+                displayLineOfFile(lineNum2, file_name2);
+            }
+
+            while(c1 != '\n'){
+                if((c1 = fgetc(file1)) == EOF){
+                    break;
+                }
+            }
+            while(c2 != '\n'){
+                if((c2 = fgetc(file2)) == EOF){
+                    break;
+                }
+            }
+        }
+
+        if(c1 == '\n') lineNum1++;
+        if(c2 == '\n') lineNum2++;
+
+        if(c1 == EOF) eof1 = 1;
+        if(c2 == EOF) eof2 = 1;
+        if(eof1 || eof2) break;
+    }
+
+    if(!eof1 && eof2){
+        //if(prevC2 == '\n') lineNum1--;
+        printf("<<<<<<<<<<<< #%d - #%d <<<<<<<<<<<<\n", lineNum1, howManyLines(file_name1));
+        while(displayLineOfFile(lineNum1, file_name1) != -1) lineNum1++;
+    }
+    else if(eof1 && !eof2){
+        //if(prevC1 == '\n') lineNum2--;
+        printf(">>>>>>>>>>>> #%d - #%d >>>>>>>>>>>>\n", lineNum2, howManyLines(file_name2));
+        while(displayLineOfFile(lineNum2, file_name2) != -1) lineNum2++;
+    }
+    else if(theFilesAreTheSame) display("The files are have no difference.");
+
+    fclose(file1);
+    fclose(file2);
+    return 0;
+}
+
+void listdir(const char * const dir, int current_depth, int maximum_depth){ //WARNING: Uses printf(). Note that maxDepth is a previously defined macro
+    //Idea from: stackoverflow.com/questions/33589672/c-print-out-directories-and-files-recursively
+
+    if((current_depth > maximum_depth + 1) && (maximum_depth != -1)) return; //this is completed with the "continue" at the beginning of the following while loop
+    DIR *dp;
+    struct dirent *entry;
+    struct stat statbuf;
+
+    if((dp = opendir(dir)) == NULL)
+    {
+        fprintf(stderr,"cannot open directory: %s\n", dir);
+        return;
+    }
+    chdir(dir);
+
+    int counter = 0;
+    for(int i = 0; i < (current_depth - 1) * 10; i++) printf("-");
+    printf("%s:\n", dir);
+
+    while((entry = readdir(dp)) != NULL)
+    {
+        if((current_depth > maximum_depth) && (maximum_depth != -1)) continue;
+        counter++;
+        if(stat(entry->d_name, &statbuf) == 0) //This is always true?
+        {
+            if(statbuf.st_mode & S_IFDIR)
+            {
+                /* Found a directory, but ignore . and .. */
+                if(strcmp(".", entry->d_name) == 0 || strcmp("..", entry->d_name) == 0)
+                    continue;
+
+                /*
+                // Concatenate directory name
+                int len = strlen(filepath);
+                strcat(filepath, entry->d_name);
+                strcat(filepath, "/");
+                */
+
+                /* Recurse at a new indent level */
+                listdir(entry->d_name, current_depth+1, maximum_depth);
+
+                /*
+                //cleanup filepath
+                filepath[len] = '\0';
+                */
+
+            }
+            else
+            {
+                /*
+                // Concatenate file name
+                strcpy(filename, filepath);
+                strcat(filename, entry->d_name);
+                //puts(filename);
+                */
+                for(int i = 0; i < (current_depth) * 10; i++) printf("-");
+                printf("%s\n", entry->d_name);
+            }
+        }
+    }
+    //printf("<%s>(%d)\n", dir, counter);
+
+    chdir("..");
+    closedir(dp);
+}
+
+int isArman(int nos){ //Warning: reads from lineBuff
+    if(nos<2) return 0;
+    for(int i = 1; i < nos; i++){
+        if(!strcmp(lineBuff[i], "=D")){
+            if(strcmp(lineBuff[i-1], "--str") && strcmp(lineBuff[i-1], "--str1") && strcmp(lineBuff[i-1], "--str2")){
+                if(i != nos - 1){
+                    return i;
+                }
+                else return -1;
+            }
+        }
+    }
+    return 0;
+}
+
 int main(){
     //Display how to use
     display("Welcome to Mirshaf's Vim.");
     display("-Notes for the find command:\n\t-Whitespace(space, tab, newline) is supported.\n\t-Wildcards can come at the beginning or the end of the string. '\\*' is supported anywhere.");
-    display("-Everything uses zero-based indexing except for the -at flag and <line no>");
-    display("-Each command must come in exactly one line; however you can write '\\n'.\n");
+    display("-Everything uses zero-based indexing except for the -at flag and line numbers which are 1-based.");
+    display("-Each command must come in exactly one line; however you can write '\\n'.");
+    display("Type a command's name to see exactly how you should structure it's input.\n");
 
     //Create Root
     getcwd(cwd, sizeof(cwd)); //can handle dot?
@@ -899,6 +1158,20 @@ int main(){
         printf("\n");*/
         if(nos == 0) continue;
         else if(nos == -1) display("Error: Too many words in one line.");
+
+        else if((forArmanFeature = isArman(nos)) != 0){
+            if(forArmanFeature == -1) display("Error: '=D' cannot come at the end of the line.");
+            else if(!strcmp(lineBuff[forArmanFeature+1], "insertstr")){}
+            else if(!strcmp(lineBuff[forArmanFeature+1], "find")){}
+            else if(!strcmp(lineBuff[forArmanFeature+1], "replace")){}
+            else if(!strcmp(lineBuff[forArmanFeature+1], "grep")){}
+            else {
+                display("Error: The command after arman(=D) must take a string as an input.");
+            }
+
+            display("Arman feature is not supported.");
+            continue;
+        }
 
         else if(!strcmp(lineBuff[0], "createfile")){
             if(nos != 3){
@@ -1066,6 +1339,46 @@ int main(){
                 }
                 if(flagC && !flagL) printf("%d\n", counter); //Warning: printf()
                 if((!flagC) && (counter == 0)) display("No match found.");
+            }
+        }
+
+        else if(!strcmp(lineBuff[0], "auto-indent")){
+            if(nos != 2){
+                display("Error: The format should be 'auto-indent <file>'");
+                continue;
+            }
+            else{
+                if(handleExistence(lineBuff[1]) == 1){
+                    createBackup(lineBuff[1], directory); //For the Undo command
+                    if(indentFile(lineBuff[1]) == 0) display("Done successfully.");
+                    else display("An unknown error occurred.");
+                }
+            }
+        }
+
+        else if(!strcmp(lineBuff[0], "compare")){
+            if(nos != 3){
+                display("Error: The format should be 'compare <file1> <file2>'");
+                continue;
+            }
+            else{
+                if((handleExistence(lineBuff[1]) == 1) && (handleExistence(lineBuff[2]) == 1)){
+                    textComparator(lineBuff[1], lineBuff[2]);
+                }
+            }
+        }
+
+        else if(!strcmp(lineBuff[0], "tree")){
+            if(nos != 2){
+                display("Error: The format should be 'tree <depth>'");
+                continue;
+            }
+            else{
+                int depth = atoi(lineBuff[1]);
+                if(depth < -1) display("Invalid depth.");
+                else{
+                    listdir("root", 1, depth);
+                }
             }
         }
 
