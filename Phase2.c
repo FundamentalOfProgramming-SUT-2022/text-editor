@@ -1,3 +1,6 @@
+//Pay respect to: www.cyberciti.biz/faq/linux-install-ncurses-library-headers-on-debian-ubuntu-centos-fedora/
+//Pay respect to: https://tldp.org/HOWTO/NCURSES-Programming-HOWTO/index.html
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -26,6 +29,9 @@ WINDOW * mainwin;
 
 int cursor_row = BASEROW, cursor_col = BASECOL;
 
+//visual mode:
+int icr, icc; //initial_cursor_row and col
+
 void phase2display(const char file_name[maxCharInAStr], int row, int col, int current_line){
     //Erase:
     erase();
@@ -39,7 +45,39 @@ void phase2display(const char file_name[maxCharInAStr], int row, int col, int cu
     //move(row, col);
     while((c = fgetc(mainFile)) != EOF){
         //addch(temp);
-        mvaddch(row, col, c);
+        if(current_mode == VIM_VISUAL){
+            /*if(cursor_row > icr){
+                if((row > icr) || ((row == icr) && (col >= icc))){
+                    attron(A_BLINK);
+                    mvaddch(row, col, c);
+                    attroff(A_BLINK);
+                }
+                else mvaddch(row, col, c);
+            }
+            else if(cursor_row < icr){
+                if((row < icr) || ((row == icr) && (col <= icc))){
+                    attron(A_BLINK);
+                    mvaddch(row, col, c);
+                    attroff(A_BLINK);
+                }
+                else mvaddch(row, col, c);
+            }*/
+            if(cursor_row == icr){
+                if((((icc >= col) && (col >= cursor_col)) || ((icc <= col) && (col <= cursor_col))) && (row == icr)){
+                    start_color();
+                    init_pair(1, COLOR_WHITE, COLOR_BLACK);
+                    init_pair(2, COLOR_BLACK, COLOR_WHITE);
+                    attron(COLOR_PAIR(2));
+                    mvaddch(row, col, c);
+                    attroff(COLOR_PAIR(1));
+                }
+                else mvaddch(row, col, c);
+            }
+            else{
+                mvaddch(row, col, c);
+            }
+        }
+        else mvaddch(row, col, c);
         if(c == '\n'){
             if(row == cursor_row){
                 if(cursor_col >= col) cursor_col = col - 1;
@@ -173,6 +211,8 @@ int main(void) {
                 }
                 else if(!strcmp(strCommand, "v")){ //VISUAL MODE
                     current_mode = VIM_VISUAL;
+                    icr = cursor_row;
+                    icc = cursor_col;
                 }
             }
             else{
@@ -218,6 +258,29 @@ int main(void) {
             else{ //PRESS N TO Go BACK TO NORMAL MODE
                 if(ch == 'n'){
                     current_mode = VIM_NORMAL;
+                }
+
+                if(current_mode == VIM_VISUAL){
+                    if(ch == 'k'){ //up
+                        if(cursor_row > BASEROW){
+                            cursor_row--;
+                        }
+                    }
+                    else if(ch == 'j'){ //down
+                        if(cursor_row < max_row - 5){
+                            cursor_row++;
+                        }
+                    }
+                    else if(ch == 'h'){ //left
+                        if(cursor_col > BASECOL){
+                            cursor_col--;
+                        }
+                    }
+                    else if(ch == 'l'){ //right{
+                        if(cursor_col < max_col - BASECOL - 1){
+                            cursor_col++;
+                        }
+                    }
                 }
             }
         }
